@@ -62,6 +62,26 @@ public class PartitionDescTest extends LocalFileMetadataTestCase {
                 dateRangeCondition);
     }
 
+    @Test
+    public void testSingleYearMonthDayFieldPartitionConditionBuilder() throws IOException {
+        DataModelManager dataModelManager = DataModelManager.getInstance(getTestConfig());
+        DataModelDesc model = dataModelManager.getDataModelDesc("test_kylin_inner_join_model_desc");
+        PartitionDesc yearMonthDayPartitionDesc = new PartitionDesc();
+        yearMonthDayPartitionDesc.setPartitionDateColumn(
+                "TEST_KYLIN_FACT.LSTG_SITE_ID,TEST_KYLIN_FACT.LEAF_CATEG_ID,TEST_KYLIN_FACT.SELLER_ID");
+        yearMonthDayPartitionDesc.setPartitionConditionBuilderClz(
+                "org.apache.kylin.metadata.model.PartitionDesc$SingleYearMonthDayFieldPartitionConditionBuilder");
+        model.setPartitionDesc(yearMonthDayPartitionDesc);
+        dataModelManager.updateDataModelDesc(model);
+        PartitionDesc.SingleYearMonthDayFieldPartitionConditionBuilder builder = (PartitionDesc.SingleYearMonthDayFieldPartitionConditionBuilder) model
+                .getPartitionDesc().getPartitionConditionBuilder();
+        String dateRangeCondition = builder.buildDateRangeCondition(model.getPartitionDesc(), null,
+                new SegmentRange(0l, 86400000l), null);
+        Assert.assertEquals(
+                "TEST_KYLIN_FACT.LSTG_SITE_ID = SUBSTRING('1970-01-01', 1, 4) AND TEST_KYLIN_FACT.LEAF_CATEG_ID = CAST(SUBSTRING('1970-01-01', 6, 2) AS INT) AND TEST_KYLIN_FACT.SELLER_ID = CAST(SUBSTRING('1970-01-01', 9, 2) AS INT)",
+                dateRangeCondition);
+    }
+
     // [KYLIN-4495] Support custom date formats for partition date column
     @Test
     public void testCustomDateFormat() {

@@ -77,6 +77,10 @@ public class PartitionDesc implements Serializable {
         partitionConditionBuilder = (IPartitionConditionBuilder) ClassUtil.newInstance(partitionConditionBuilderClz);
         if (partitionConditionBuilder instanceof CustomYearMonthDayFieldPartitionConditionBuilder) {
             ((CustomYearMonthDayFieldPartitionConditionBuilder)partitionConditionBuilder).init(this, model);
+        }
+        //Support SingleYearMonthDayFieldPartitionConditionBuilder, partitionDateColumn split by ","
+        else if (partitionConditionBuilder instanceof SingleYearMonthDayFieldPartitionConditionBuilder) {
+            ((SingleYearMonthDayFieldPartitionConditionBuilder)partitionConditionBuilder).init(this, model);
         } else {
             partitionDateColumnRef = model.findColumn(partitionDateColumn);
             partitionDateColumn = partitionDateColumnRef.getIdentity();
@@ -446,6 +450,52 @@ public class PartitionDesc implements Serializable {
             }
             builder.append(concatField + " < '" + DateFormat.formatToDateStr(endExclusive) + "'");
 
+            return builder.toString();
+        }
+
+        public void init(PartitionDesc partitionDesc, DataModelDesc model) {
+            String[] yearMonthDayColumns = partitionDesc.getPartitionDateColumn().split(",");
+            if (yearMonthDayColumns.length != 3) {
+                throw new IllegalArgumentException(partitionDesc.getPartitionDateColumn() + " is not year, month, and day columns");
+            }
+            TblColRef yearRef = model.findColumn(yearMonthDayColumns[0]);
+            yearPartitionDateColumn = yearRef.getIdentity();
+            monthPartitionDateColumn = model.findColumn(yearMonthDayColumns[1]).getIdentity();
+            dayPartitionDateColumn = model.findColumn(yearMonthDayColumns[2]).getIdentity();
+            //for partition desc isPartitioned() true
+            partitionDesc.setPartitionDateColumnRef(yearRef);
+        }
+    }
+
+    /**
+     * Another implementation of IPartitionConditionBuilder, for Delta tables which have three partition columns "YEAR", "MONTH", and "DAY";
+     * This class will split the startInclusive date into yr/mo/dy components so that Delta Hive connector can prune partitions properly;
+     * This class also ignores endExclusive and so can only be used to build one day at a time.
+     * It may also be used for non-Delta tables that do not have any zero-padding on the month/day columns.
+     * implements Serializable for spark build
+     */
+    public static class SingleYearMonthDayFieldPartitionConditionBuilder implements IPartitionConditionBuilder, Serializable {
+        private String yearPartitionDateColumn;
+        private String monthPartitionDateColumn;
+        private String dayPartitionDateColumn;
+        @Override
+        public String buildDateRangeCondition(PartitionDesc partDesc, ISegment seg, SegmentRange segRange, Function<TblColRef, String> func) {
+            long startInclusive = (Long) segRange.start.v;
+            // long endExclusive = (Long) segRange.end.v;
+
+            TblColRef partitionColumn = partDesc.getPartitionDateColumnRef();
+            if (partitionColumn != null) {
+                partitionColumn.setQuotedFunc(func);
+            }
+            String tableAlias = partitionColumn.getTableAlias();
+
+            String startInclusiveString = DateFormat.formatToDateStr(startInclusive);
+            String yearField = String.format(Locale.ROOT, "%s = SUBSTRING('%s', 1, 4)", yearPartitionDateColumn, startInclusiveString);
+            String monthField = String.format(Locale.ROOT, "%s = CAST(SUBSTRING('%s', 6, 2) AS INT)", monthPartitionDateColumn, startInclusiveString);
+            String dayField = String.format(Locale.ROOT, "%s = CAST(SUBSTRING('%s', 9, 2) AS INT)", dayPartitionDateColumn, startInclusiveString);
+            StringBuilder builder = new StringBuilder();
+
+            builder.append(yearField + " AND " + monthField + " AND " + dayField);
             return builder.toString();
         }
 
